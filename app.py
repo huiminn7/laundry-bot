@@ -62,38 +62,36 @@ else:
                     st.error(f"**{name.replace('_', ' ')}**")
                     st.write("🔴 In use")
                     
-                    # === THE LIVE JAVASCRIPT COUNTDOWN TRICK ===
+                    # === BULLETPROOF JAVASCRIPT COUNTDOWN ===
                     if data.get('end_time'):
                         try:
-                            # Pass the exact finish time to the browser
+                            # 1. Python calculates the exact remaining seconds (bypasses timezone desyncs)
                             end_time_str = data['end_time'].replace('Z', '+00:00')
+                            parsed_end_time = datetime.fromisoformat(end_time_str).replace(tzinfo=None)
+                            remaining_seconds = int((parsed_end_time - datetime.now()).total_seconds())
                             
-                            # Write a tiny HTML/JS script for this specific machine
+                            # 2. Tell the browser to just count down from those exact seconds
                             js_timer = f"""
                             <div id="timer_{name}" style="font-family: sans-serif; color: #ff4b4b; font-weight: bold; margin-bottom: 5px;"></div>
                             <script>
-                                var countDownDate = new Date("{end_time_str}").getTime();
+                                var remainingMs = {remaining_seconds} * 1000;
                                 var x = setInterval(function() {{
-                                    var now = new Date().getTime();
-                                    var distance = countDownDate - now;
-                                    
-                                    var minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-                                    var seconds = Math.floor((distance % (1000 * 60)) / 1000);
-                                    
-                                    document.getElementById("timer_{name}").innerHTML = "⏳ " + minutes + "m " + seconds + "s left";
-                                    
-                                    if (distance < 0) {{
+                                    if (remainingMs <= 0) {{
                                         clearInterval(x);
                                         document.getElementById("timer_{name}").innerHTML = "⏳ Finishing up...";
+                                    }} else {{
+                                        var minutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
+                                        var seconds = Math.floor((remainingMs % (1000 * 60)) / 1000);
+                                        document.getElementById("timer_{name}").innerHTML = "⏳ " + minutes + "m " + seconds + "s left";
+                                        remainingMs -= 1000; // Tick down 1 second
                                     }}
                                 }}, 1000);
                             </script>
                             """
-                            # Inject it straight into the Streamlit website!
                             components.html(js_timer, height=35)
                         except Exception:
                             pass
-                    # ============================================
+                    # ========================================
                             
                     if data.get('username'):
                         st.caption(f"👤 @{data['username']}")
