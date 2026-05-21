@@ -39,41 +39,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
-# ========== SHOW LAUNDRY OPTIONS FOR SELECTED KK ==========
-async def show_kk_menu(update, context, kk_name):
-    # Fetch live data specifically for this KK
-    response = supabase.table('machines').select('*').eq('kk_name', kk_name).execute()
-    machines = response.data
-    
-    if not machines:
-        await send_message(update, context, f"❌ No machines registered for {kk_name} yet.")
-        return
-
-    # Dynamically build a neat grid layout depending on what exists in the DB
-    keyboard = []
-    row = []
-    for m in sorted(machines, key=lambda x: x['name']):
-        status_label = "🔴" if m['status'] == 'busy' else "🔒"
-        # Callback data passes both action, machine name, and college name safely separated by tokens
-        button = InlineKeyboardButton(f"{status_label} {m['name'].replace('_', ' ')}", callback_data=f"lock:{m['name']}:{kk_name}")
-        row.append(button)
-        if len(row) == 2: # Keep it clean at 2 items per row
-            keyboard.append(row)
-            row = []
-    if row:
-        keyboard.append(row)
-        
-    keyboard.append([InlineKeyboardButton("🔓 Unlock My Machine", callback_data=f"unlock_prompt:{kk_name}")])
-    keyboard.append([InlineKeyboardButton("⬅️ Back to College List", callback_data="back_to_main")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    text = f"🏢 *{kk_name} Laundry Management*\n\nClick a machine to lock it for a 45-minute cycle:"
-    await send_message(update, context, text)
-    # Update the layout message
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-
 # ========== COMMAND: /status ==========
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fetch live data directly from Supabase
@@ -129,6 +94,45 @@ async def unlock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     subprocess.run(["python", "update.py", found_machine, "free"])
     
     await send_message(update, context, f"✅ *{found_machine.replace('_', ' ')} UNLOCKED!* Thank you for clearing the machine.")
+
+# ========== SHOW LAUNDRY OPTIONS FOR SELECTED KK ==========
+async def show_kk_menu(update, context, kk_name):
+    # Fetch live data specifically for this KK
+    response = supabase.table('machines').select('*').eq('kk_name', kk_name).execute()
+    machines = response.data
+    
+    if not machines:
+        await send_message(update, context, f"❌ No machines registered for {kk_name} yet.")
+        return
+
+    # 1. Put the Status Button right at the top of the KK menu!
+    keyboard = [
+        [InlineKeyboardButton(f"📊 View {kk_name} Live Status", callback_data=f"status_kk:{kk_name}")]
+    ]
+    
+    # 2. Build the dynamic washer buttons (2 items per row)
+    row = []
+    for m in sorted(machines, key=lambda x: x['name']):
+        status_label = "🔴" if m['status'] == 'busy' else "🔒"
+        button = InlineKeyboardButton(f"{status_label} {m['name'].replace('_', ' ')}", callback_data=f"lock:{m['name']}:{kk_name}")
+        row.append(button)
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+        
+    # 3. Append navigation buttons at the bottom
+    keyboard.append([InlineKeyboardButton("🔓 Unlock My Machine", callback_data=f"unlock_prompt:{kk_name}")])
+    keyboard.append([InlineKeyboardButton("⬅️ Back to College List", callback_data="back_to_main")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    text = f"🏢 *{kk_name} Laundry Management*\n\nChoose an option below:"
+    await send_message(update, context, text)
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 # ========== BUTTON HANDLER (UPDATED FOR DYNAMIC SPLITTING) ==========
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
