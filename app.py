@@ -50,7 +50,7 @@ else:
                     
                     if st.button(f"🔒 Lock Machine", key=f"lock_{name}_{selected_kk}", use_container_width=True):
                         # Currently set to 1 minute for fast testing! Change to 45 later.
-                        end_time = datetime.now() + timedelta(minutes=1)
+                        end_time = datetime.now() + timedelta(minutes=3)
                         supabase.table('machines').update({
                             'status': 'busy',
                             'username': 'Web User',
