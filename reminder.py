@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime
 from telegram import Bot
 from supabase import create_client
 
@@ -10,54 +10,45 @@ except ImportError:
     print("❌ Error: config.py not found.")
     exit(1)
 
-# Initialize Supabase and Telegram Bot
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 bot = Bot(token=TOKEN)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 async def check_reminders():
-    print("⏳ Starting the background reminder loop...")
+    print("⏳ Laundry Reminder Engine is online and watching the clock...")
     
     while True:
         try:
-            # 1. Get current time in UTC to match Supabase's isoformat
-            now = datetime.now(timezone.utc)
+            # 1. Get the exact current time
+            now = datetime.now().isoformat()
             
-            # 2. Fetch all reminders that have expired AND haven't been sent yet
-            # (Assuming you add a 'sent' boolean column to your reminders table, defaulting to FALSE)
-            response = supabase.table('reminders').select('*').eq('sent', False).execute()
+            # 2. Ask Supabase: "Give me all reminders where the end_time is right now or in the past"
+            response = supabase.table('reminders').select('*').lte('end_time', now).execute()
+            expired_reminders = response.data
             
-            for reminder in response.data:
-                # Convert Supabase string time back to a Python datetime object
-                end_time_str = reminder['end_time']
+            for reminder in expired_reminders:
+                chat_id = reminder['chat_id']
+                machine_num = reminder.get('machine_id', 'Unknown')
                 
-                # Note: If your end_time in Supabase doesn't have a timezone, 
-                # you might need to adjust this parsing logic.
-                end_time = datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+                # 3. Fire the push notification to Telegram!
+                try:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=f"🔔 *BEEP BEEP!*\n\nYour laundry in Washer {machine_num} is finished!\n\nPlease collect your clothes so others can use the machine.",
+                        parse_mode="Markdown"
+                    )
+                    print(f"✅ Successfully notified @{reminder.get('username')}")
+                except Exception as e:
+                    print(f"❌ Failed to text chat_id {chat_id}: {e}")
                 
-                # 3. If the current time has passed the end_time
-                if now >= end_time:
-                    machine_name = "Washer 1" if reminder['machine_id'] == 1 else "Washer 2"
-                    chat_id = reminder['chat_id']
-                    
-                    print(f"🔔 Sending reminder to {reminder['username']} for {machine_name}")
-                    
-                    # 4. Send the Telegram message
-                    message = f"🚨 *BEEP BEEP!*\n\nWei @{reminder['username']}, your laundry in *{machine_name}* is done!\n\nPlease go collect it now so others can use the machine."
-                    
-                    await bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown")
-                    
-                    # 5. Mark the reminder as sent in Supabase so we don't spam them
-                    supabase.table('reminders').update({'sent': True}).eq('id', reminder['id']).execute()
-                    
-                    # 6. Optional: Auto-free the machine in the database 
-                    # (You might want them to manually click "Unlock" instead to ensure they actually took their clothes out)
-                    
+                # 4. Delete the reminder from the database so we don't spam them forever
+                supabase.table('reminders').delete().eq('id', reminder['id']).execute()
+                
         except Exception as e:
-            print(f"⚠️ Error checking reminders: {e}")
+            print(f"⚠️ Warning in background loop: {e}")
             
-        # Wait 60 seconds before checking the database again
+        # Wait exactly 60 seconds before checking the clock again
         await asyncio.sleep(60)
 
 if __name__ == "__main__":
-    # Run the async loop
+    # Start the infinite background loop
     asyncio.run(check_reminders())
