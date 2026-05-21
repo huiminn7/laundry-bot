@@ -24,20 +24,17 @@ if action == "lock":
     end_time = datetime.now() + timedelta(minutes=45)
     
     # Target specific machine inside the specific KK
-    supabase.table('machines').update({
-        'status': 'busy',
-        'user_id': user_id,
-        'username': username,
-        'end_time': end_time.isoformat(),
-        'updated_at': datetime.now().isoformat()
-    }).eq('name', machine).eq('kk_name', kk_name).execute() # CRITICAL FIX
-    
-    # Create reminder
+    # Create reminder dynamically for any washer number (Washer_1 to Washer_6)
+    try:
+        washer_number = int(machine.split('_')[1]) # Extracts 1 from "Washer_1", 3 from "Washer_3" etc.
+    except:
+        washer_number = 1 # Fallback default
+        
     supabase.table('reminders').insert({
-        'machine_id': 1 if machine == 'Washer_1' else 2, # You can update this row ID logic later
+        'machine_id': washer_number,
         'user_id': user_id,
         'username': username,
-        'chat_id': int(user_id),
+        'chat_id': int(user_id),  # Telegram user ID as chat_id
         'end_time': end_time.isoformat()
     }).execute()
     

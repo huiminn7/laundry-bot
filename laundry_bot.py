@@ -155,33 +155,52 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_kk_menu(update, context, kk_name)
         
     # === FIXED: Handle the live status checking for a specific KK ===
+    # === FIXED STATUS: Updates the menu text directly! ===
     elif data.startswith("status_kk:"):
         kk_name = data.split(":")[1]
         
-        # 1. Fetch live data from Supabase rows directly
+        # Fetch live data from Supabase rows directly
         response = supabase.table('machines').select('*').eq('kk_name', kk_name).execute()
         machines_list = response.data
         
-        text = f"🧺 *Live Status for {kk_name}*\n\n"
+        # Start building the updated menu text block
+        text = f"🏢 *{kk_name} Laundry Management*\n"
+        text += "--------------------------------------\n"
         
         if not machines_list:
-            text += "❌ No machines found registered for this college room."
+            text += "❌ No machines found registered for this college room.\n"
         else:
-            # 2. Sort the list of dictionaries by the 'name' key cleanly
             sorted_machines = sorted(machines_list, key=lambda x: x['name'])
-            
             for info in sorted_machines:
                 status_icon = "🟢" if info["status"] == "available" else "🔴"
                 machine_title = info["name"].replace('_', ' ')
-                
                 text += f"{status_icon} *{machine_title}*: {info['status'].title()}\n"
                 if info["status"] == "busy" and info.get("username"):
-                    text += f"   👤 Used by: @{info['username']}\n"
+                    text += f"      👤 @{info['username']}\n"
         
-        # Send the status summary as a clear, separate message
-        await query.message.reply_text(text, parse_mode="Markdown")
-        # Keep the interaction menu available so the user doesn't have to re-trigger /start
-        await show_kk_menu(update, context, kk_name)
+        text += "--------------------------------------\n"
+        text += "Click a machine below to lock it for a 45-minute cycle:"
+
+        # Rebuild the keyboard menu exact same way so it doesn't vanish
+        keyboard = [
+            [InlineKeyboardButton(f"🔄 Refresh Live Status", callback_data=f"status_kk:{kk_name}")]
+        ]
+        row = []
+        for m in sorted(machines_list, key=lambda x: x['name']):
+            status_label = "🔴" if m['status'] == 'busy' else "🔒"
+            button = InlineKeyboardButton(f"{status_label} {m['name'].replace('_', ' ')}", callback_data=f"lock:{m['name']}:{kk_name}")
+            row.append(button)
+            if len(row) == 2:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+            
+        keyboard.append([InlineKeyboardButton("🔓 Unlock My Machine", callback_data=f"unlock_prompt:{kk_name}")])
+        keyboard.append([InlineKeyboardButton("⬅️ Back to College List", callback_data="back_to_main")])
+        
+        # EDIT the current message instead of sending a new one!
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         
     elif data.startswith("lock:"):
         _, machine, kk_name = data.split(":")
