@@ -27,38 +27,48 @@ async def check_reminders():
             for reminder in expired_reminders:
                 chat_id = reminder['chat_id']
                 machine_num = reminder.get('machine_id', 'Unknown')
+                username = reminder.get('username', '')
                 
-                # 1. Fire the push notification to Telegram
-                try:
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=f"🔔 *BEEP BEEP!*\n\nYour laundry in Washer {machine_num} is finished!\n\nThe machine has been auto-unlocked for the next user.",
-                        parse_mode="Markdown"
-                    )
-                    print(f"✅ Notified user {chat_id}")
-                except Exception as e:
-                    print(f"❌ Failed to text chat_id {chat_id}: {e}")
+                # ====== WAITLIST NOTIFICATION ======
+                if username.startswith('WAITLIST_'):
+                    try:
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=f"🏃‍♂️ *QUICK!* Washer {machine_num} is finally FREE!\n\nOpen the menu to lock it before someone else does.",
+                            parse_mode="Markdown"
+                        )
+                        print(f"✅ Waitlist pinged for user {chat_id}")
+                    except Exception:
+                        pass
                 
-                # 2. === THE AUTO-UNLOCK MAGIC ===
-                # This finds the exact machine this user locked and resets it perfectly!
-                try:
-                    supabase.table('machines').update({
-                        'status': 'available',
-                        'user_id': '',
-                        'username': '',
-                        'end_time': None
-                    }).eq('user_id', str(chat_id)).execute()
-                    print(f"🔓 Auto-unlocked machine for user {chat_id}")
-                except Exception as e:
-                    print(f"❌ Failed to auto-unlock machine: {e}")
+                # ====== OWNER NOTIFICATION & UNLOCK ======
+                else:
+                    try:
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=f"🔔 *BEEP BEEP!*\n\nYour laundry in Washer {machine_num} is finished!\n\nThe machine has been auto-unlocked for the next user.",
+                            parse_mode="Markdown"
+                        )
+                        print(f"✅ Notified owner {chat_id}")
+                    except Exception:
+                        pass
+                    
+                    try:
+                        supabase.table('machines').update({
+                            'status': 'available',
+                            'user_id': '',
+                            'username': '',
+                            'end_time': None
+                        }).eq('user_id', str(chat_id)).execute()
+                    except Exception:
+                        pass
                 
-                # 3. Delete the reminder so it doesn't spam
+                # Clean up the reminder
                 supabase.table('reminders').delete().eq('id', reminder['id']).execute()
                 
         except Exception as e:
             print(f"⚠️ Warning in background loop: {e}")
             
-        # Wait 60 seconds before checking again
         await asyncio.sleep(60)
 
 if __name__ == "__main__":

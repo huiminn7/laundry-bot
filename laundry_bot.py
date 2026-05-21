@@ -34,20 +34,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_kk_menu(update, context, kk_name, alert_text=None):
     query = update.callback_query
     
-    # Fetch live data specifically for this KK
     response = supabase.table('machines').select('*').eq('kk_name', kk_name).execute()
     machines = response.data
     
-    # Start building a single, cohesive message string
     text = f"🏢 *{kk_name} Laundry Management*\n"
     text += "--------------------------------------\n"
-    
     if alert_text:
         text += f"{alert_text}\n"
         text += "--------------------------------------\n"
         
     text += "📋 *Current Machine Availability:*\n"
-    
     if not machines:
         text += "❌ No machines registered for this college yet.\n"
     else:
@@ -56,30 +52,12 @@ async def show_kk_menu(update, context, kk_name, alert_text=None):
             status_icon = "🟢" if info["status"] == "available" else "🔴"
             machine_title = info["name"].replace('_', ' ')
             text += f"{status_icon} *{machine_title}*: {info['status'].title()}\n"
-            
-            # Show Username and Countdown Timer
-            if info["status"] == "busy":
-                if info.get("username"):
-                    text += f"      👤 @{info['username']}\n"
-                
-                # Calculate the countdown
-                if info.get("end_time"):
-                    try:
-                        end_time_str = info["end_time"].replace('Z', '+00:00')
-                        end_time = datetime.fromisoformat(end_time_str).replace(tzinfo=None)
-                        remaining = int((end_time - datetime.now()).total_seconds() / 60)
-                        
-                        if remaining > 0:
-                            text += f"      ⏳ {remaining} mins left\n"
-                        else:
-                            text += f"      ⏳ Finishing up...\n"
-                    except Exception:
-                        pass
+            if info["status"] == "busy" and info.get("username"):
+                text += f"      👤 @{info['username']}\n"
                 
     text += "--------------------------------------\n"
-    text += "Click a machine below to lock it for a cycle:"
+    text += "Tap an available machine to lock, or tap a busy one to join the waitlist:"
 
-    # Build the buttons
     keyboard = [
         [InlineKeyboardButton("🔄 Refresh Live Status", callback_data=f"status_kk:{kk_name}")]
     ]
@@ -87,8 +65,25 @@ async def show_kk_menu(update, context, kk_name, alert_text=None):
     if machines:
         row = []
         for m in sorted(machines, key=lambda x: x['name']):
-            status_label = "🔴" if m['status'] == 'busy' else "🔒"
-            button = InlineKeyboardButton(f"{status_label} {m['name'].replace('_', ' ')}", callback_data=f"lock:{m['name']}:{kk_name}")
+            # === NEW: Put the countdown directly ON the button! ===
+            if m['status'] == 'busy':
+                time_label = ""
+                if m.get("end_time"):
+                    try:
+                        end_time = datetime.fromisoformat(m["end_time"].replace('Z', '+00:00')).replace(tzinfo=None)
+                        remaining = int((end_time - datetime.now()).total_seconds() / 60)
+                        if remaining > 0:
+                            time_label = f" ({remaining}m left)"
+                        else:
+                            time_label = " (Done)"
+                    except Exception:
+                        pass
+                status_label = f"🔴 {m['name'].replace('_', ' ')}{time_label}"
+            else:
+                status_label = f"🟢 {m['name'].replace('_', ' ')}"
+            # =======================================================
+            
+            button = InlineKeyboardButton(status_label, callback_data=f"lock:{m['name']}:{kk_name}")
             row.append(button)
             if len(row) == 2:
                 keyboard.append(row)
@@ -108,7 +103,6 @@ async def show_kk_menu(update, context, kk_name, alert_text=None):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
     data = query.data
     
     if data == "back_to_main":
@@ -134,13 +128,36 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         username = user.first_name if user.first_name else (user.username or "Student")
         
         # Verify status directly
-        res = supabase.table('machines').select('status').eq('name', machine).eq('kk_name', kk_name).execute()
+        res = supabase.table('machines').select('*').eq('name', machine).eq('kk_name', kk_name).execute()
         if res.data and res.data[0]['status'] == 'busy':
-            alert = f"❌ *{machine.replace('_', ' ')}* is already being used!"
+            machine_data = res.data[0]
+            
+            if machine_data.get('user_id') == user_id:
+                alert = f"❌ You are already using {machine.replace('_', ' ')}!"
+                await show_kk_menu(update, context, kk_name, alert_text=alert)
+                return
+                
+            # ====== NEW WAITLIST FEATURE ======
+            try:
+                washer_number = int(machine.split('_')[1])
+            except:
+                washer_number = 1
+                
+            # Add this user to the waitlist for this machine
+            supabase.table('reminders').insert({
+                'machine_id': washer_number,
+                'user_id': user_id,
+                'username': f"WAITLIST_{username}",
+                'chat_id': int(user_id),
+                'end_time': machine_data.get('end_time', datetime.now().isoformat())
+            }).execute()
+            
+            alert = f"👀 *{machine.replace('_', ' ')}* is busy! I've added you to the waitlist and will ping you when it's free."
             await show_kk_menu(update, context, kk_name, alert_text=alert)
             return
+            # ==================================
             
-        # Set timer to 1 MINUTE for testing (Change to 45 for presentation!)
+        # Change to 45 mins for final presentation!
         end_time = datetime.now() + timedelta(minutes=1)
         
         # Lock machine
@@ -152,7 +169,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'updated_at': datetime.now().isoformat()
         }).eq('name', machine).eq('kk_name', kk_name).execute()
         
-        # Add reminder
+        # Add owner reminder
         try:
             washer_number = int(machine.split('_')[1])
         except:
@@ -180,6 +197,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         target_machine = res.data[0]['name']
+        try:
+            washer_number = int(target_machine.split('_')[1])
+        except:
+            washer_number = 1
         
         # Unlock machine
         supabase.table('machines').update({
@@ -190,13 +211,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'updated_at': datetime.now().isoformat()
         }).eq('name', target_machine).eq('kk_name', kk_name).execute()
         
+        # ====== FAST-FORWARD WAITLIST ======
+        # Cancel the owner's beep
+        supabase.table('reminders').delete().eq('user_id', user_id).eq('machine_id', washer_number).execute()
+        # Trigger the waitlist notifications immediately!
+        now_iso = datetime.now().isoformat()
+        supabase.table('reminders').update({'end_time': now_iso}).eq('machine_id', washer_number).execute()
+        # ===================================
+        
         alert = f"🔓 *{target_machine.replace('_', ' ')} has been unlocked!*"
         await show_kk_menu(update, context, kk_name, alert_text=alert)
 
 # ========== MAIN ==========
 async def main():
     app = Application.builder().token(TOKEN).build()
-    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     
