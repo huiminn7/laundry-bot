@@ -79,8 +79,29 @@ async def show_kk_menu(update, context, kk_name, alert_text=None):
             status_icon = "🟢" if info["status"] == "available" else "🔴"
             machine_title = info["name"].replace('_', ' ')
             text += f"{status_icon} *{machine_title}*: {info['status'].title()}\n"
-            if info["status"] == "busy" and info.get("username"):
-                text += f"      👤 @{info['username']}\n"
+            
+            # === UPDATED: Show Username and Countdown Timer ===
+            if info["status"] == "busy":
+                if info.get("username"):
+                    text += f"      👤 @{info['username']}\n"
+                
+                # Calculate the countdown if an end_time exists
+                if info.get("end_time"):
+                    try:
+                        # Clean the Supabase timestamp and convert it
+                        end_time_str = info["end_time"].replace('Z', '+00:00')
+                        end_time = datetime.fromisoformat(end_time_str).replace(tzinfo=None)
+                        
+                        # Calculate remaining minutes
+                        remaining = int((end_time - datetime.now()).total_seconds() / 60)
+                        
+                        if remaining > 0:
+                            text += f"      ⏳ {remaining} mins left\n"
+                        else:
+                            text += f"      ⏳ Finishing up...\n"
+                    except Exception as e:
+                        pass # Failsafe in case of weird database formats
+            # ==================================================
                 
     text += "--------------------------------------\n"
     text += "Click a machine below to lock it for a 45-minute cycle:"
